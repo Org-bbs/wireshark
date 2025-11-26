@@ -93,6 +93,7 @@ private:
     int hexPixels();
     int asciiPixels();
     int totalPixels();
+    int calculateUtf8RowWidth();
     const QByteArray printableData() { return data_; }
 
     static const int separator_interval_;
