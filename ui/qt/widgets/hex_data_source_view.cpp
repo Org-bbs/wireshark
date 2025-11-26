@@ -263,7 +263,7 @@ void HexDataSourceView::updateByteViewSettings()
     if (recent.gui_bytes_view == BYTES_BITS) {
         row_width_ = 8;
     } else if (recent.gui_bytes_view == BYTES_UTF8) {
-        row_width_ = 32; // More bytes per line for UTF-8 text view
+        updateUtf8RowWidth();
     } else {
         row_width_ = 16;
     }
@@ -432,6 +432,37 @@ void HexDataSourceView::updateLayoutMetrics()
     em_width_  = stringWidth("M");
     // We might want to match ProtoTree::rowHeight.
     line_height_ = viewport()->fontMetrics().lineSpacing();
+}
+
+void HexDataSourceView::updateUtf8RowWidth()
+{
+    if (recent.gui_bytes_view != BYTES_UTF8 || !viewport()) {
+        return;
+    }
+
+    if (em_width_ == 0 || line_height_ == 0) {
+        updateLayoutMetrics();
+    }
+
+    if (em_width_ == 0) {
+        return;
+    }
+
+    // UTF-8 mode skips the hex column and prepends two pad spaces before text,
+    // plus a small safety margin to avoid wrapping glitches.
+    const int utf8_padding_chars = 3;
+    const int available_pixels = viewport()->width() - offsetPixels();
+
+    if (available_pixels <= 0) {
+        return;
+    }
+
+    const int max_chars = available_pixels / em_width_;
+    const int new_row_width = qMax(1, max_chars - utf8_padding_chars);
+
+    if (row_width_ != new_row_width) {
+        row_width_ = new_row_width;
+    }
 }
 
 int HexDataSourceView::stringWidth(const QString &line)
@@ -858,6 +889,10 @@ void HexDataSourceView::copyBytes(bool)
 // math easier. Should we do smooth scrolling?
 void HexDataSourceView::updateScrollbars()
 {
+    if (recent.gui_bytes_view == BYTES_UTF8) {
+        updateUtf8RowWidth();
+    }
+
     const int length = static_cast<int>(data_.size());
     if (length > 0 && line_height_ > 0 && em_width_ > 0) {
         int all_lines_height = length / row_width_ + ((length % row_width_) ? 1 : 0) - viewport()->height() / line_height_;

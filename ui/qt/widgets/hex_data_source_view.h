@@ -76,6 +76,7 @@ private:
     QTextLayout *layout_;
 
     void updateLayoutMetrics();
+    void updateUtf8RowWidth();
     int stringWidth(const QString &line);
     void drawLine(QPainter *painter, const int offset, const int row_y);
     bool addFormatRange(QList<QTextLayout::FormatRange> &fmt_list, int start, int length, HighlightMode mode);
