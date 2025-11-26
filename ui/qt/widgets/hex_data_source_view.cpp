@@ -63,7 +63,7 @@ HexDataSourceView::HexDataSourceView(const QByteArray &data, packet_char_enc enc
     show_offset_(true),
     show_hex_(true),
     show_ascii_(true),
-    row_width_(recent.gui_bytes_view == BYTES_BITS ? 8 : (recent.gui_bytes_view == BYTES_UTF8 ? 32 : 16)),
+    row_width_(recent.gui_bytes_view == BYTES_BITS ? 8 : (recent.gui_bytes_view == BYTES_UTF8 ? 32 : 16)), // Will be recalculated for UTF-8 in updateByteViewSettings
     em_width_(0),
     line_height_(0),
     allow_hover_selection_(false)
@@ -263,7 +263,9 @@ void HexDataSourceView::updateByteViewSettings()
     if (recent.gui_bytes_view == BYTES_BITS) {
         row_width_ = 8;
     } else if (recent.gui_bytes_view == BYTES_UTF8) {
-        row_width_ = 32; // More bytes per line for UTF-8 text view
+        // Calculate row width based on viewport width for UTF-8 mode
+        updateLayoutMetrics();
+        row_width_ = calculateUtf8RowWidth();
     } else {
         row_width_ = 16;
     }
@@ -276,6 +278,15 @@ void HexDataSourceView::updateByteViewSettings()
 void HexDataSourceView::paintEvent(QPaintEvent *)
 {
     updateLayoutMetrics();
+    
+    // Recalculate row width for UTF-8 mode if needed (viewport width may have changed)
+    if (recent.gui_bytes_view == BYTES_UTF8) {
+        int new_row_width = calculateUtf8RowWidth();
+        if (new_row_width != row_width_) {
+            row_width_ = new_row_width;
+            updateScrollbars();
+        }
+    }
 
     QPainter painter(viewport());
     painter.translate(-horizontalScrollBar()->value() * em_width_, 0);
@@ -351,6 +362,11 @@ void HexDataSourceView::paintEvent(QPaintEvent *)
 
 void HexDataSourceView::resizeEvent(QResizeEvent *)
 {
+    // Recalculate row width for UTF-8 mode when viewport is resized
+    if (recent.gui_bytes_view == BYTES_UTF8) {
+        updateLayoutMetrics();
+        row_width_ = calculateUtf8RowWidth();
+    }
     updateScrollbars();
 }
 
@@ -837,6 +853,58 @@ int HexDataSourceView::asciiPixels()
 int HexDataSourceView::totalPixels()
 {
     return offsetPixels() + hexPixels() + asciiPixels();
+}
+
+int HexDataSourceView::calculateUtf8RowWidth()
+{
+    if (recent.gui_bytes_view != BYTES_UTF8) {
+        return 32; // Default fallback
+    }
+
+    // Ensure layout metrics are up to date
+    if (em_width_ == 0) {
+        updateLayoutMetrics();
+    }
+    
+    if (em_width_ == 0) {
+        return 32; // Fallback if metrics not available
+    }
+
+    // Calculate available width for UTF-8 text
+    int available_width = viewport()->width();
+    
+    // Subtract offset width if shown
+    if (show_offset_) {
+        available_width -= offsetPixels();
+    }
+    
+    // Subtract spacing before text (2 spaces)
+    available_width -= em_width_ * 2;
+    
+    // Use a small margin to avoid text being cut off
+    available_width -= em_width_;
+    
+    if (available_width <= 0) {
+        return 1; // Minimum 1 byte per line
+    }
+    
+    // Estimate bytes per line based on average character width
+    // For UTF-8, we need to estimate: most ASCII characters are 1 byte and 1 em wide
+    // But some UTF-8 characters can be multiple bytes and may be wider
+    // Use a conservative estimate: assume average 1.2 em width per byte
+    // This accounts for multi-byte UTF-8 characters and spacing
+    // For better accuracy, we could measure actual character widths, but this is a good approximation
+    int estimated_bytes = static_cast<int>(available_width / (em_width_ * 1.2));
+    
+    // Ensure reasonable bounds
+    if (estimated_bytes < 1) {
+        return 1;
+    }
+    if (estimated_bytes > 1000) {
+        return 1000; // Reasonable maximum
+    }
+    
+    return estimated_bytes;
 }
 
 void HexDataSourceView::copyBytes(bool)
