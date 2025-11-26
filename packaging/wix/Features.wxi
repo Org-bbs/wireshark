@@ -88,7 +88,7 @@
         <ComponentGroupRef Id="CG.Tools.MMDBResolve" />
       </Feature>
       <?endif?>
-      <Feature Id="Fe.Tools.Androiddump" Title="Androiddump" Level="2" AllowAdvertise="yes" Display="expand" Description="Provide capture interfaces from Android devices.">
+      <Feature Id="Fe.Tools.Androiddump" Title="Androiddump" Level="1" AllowAdvertise="yes" Display="expand" Description="Provide capture interfaces from Android devices.">
         <ComponentGroupRef Id="CG.Tools.Androiddump" />
       </Feature>
       <Feature Id="Fe.Tools.Randpktdump" Title="Randpktdump" Level="2" AllowAdvertise="yes" Display="expand" Description="Provide random packet generator.">
