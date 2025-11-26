@@ -584,14 +584,14 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 x_pos_to_column_ += QVector<int>().fill(-1, em_width_ * 2);
             }
             
-            int line_start_pos = line.length();
+            qsizetype line_start_pos = line.length();
             line += utf8_text;
             
             // Build x_pos_to_column_ mapping for UTF-8 text
             if (build_x_pos) {
                 // Map each displayed character position to its byte offset
                 int byte_pos = 0;
-                for (int i = 0; i < utf8_text.length(); i++) {
+                for (qsizetype i = 0; i < utf8_text.length(); i++) {
                     QChar ch = utf8_text[i];
                     int char_width = stringWidth(QString(ch));
                     x_pos_to_column_ += QVector<int>().fill(byte_pos, char_width);
@@ -606,7 +606,7 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
             if (hovered_byte_offset_ >= offset && hovered_byte_offset_ <= max_tvb_pos) {
                 int rel_pos = hovered_byte_offset_ - offset;
                 QString substr = QString::fromUtf8(line_data.left(rel_pos + 1));
-                int char_idx = substr.length() - 1;
+                qsizetype char_idx = substr.length() - 1;
                 if (char_idx >= 0 && char_idx < utf8_text.length()) {
                     QRect ho_rect = painter->boundingRect(QRect(), 0, QString(utf8_text[char_idx]));
                     ho_rect.moveLeft(stringWidth(line.left(line_start_pos + char_idx)));
