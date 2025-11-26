@@ -82,6 +82,9 @@ HexDataSourceView::HexDataSourceView(const QByteArray &data, packet_char_enc enc
 #ifdef Q_OS_MAC
     setAttribute(Qt::WA_MacShowFocusRect, true);
 #endif
+
+    // For UTF-8 mode, the row_width will be dynamically calculated later in updateLayoutMetrics()
+    // when em_width_ is available
 }
 
 HexDataSourceView::~HexDataSourceView()
@@ -263,7 +266,8 @@ void HexDataSourceView::updateByteViewSettings()
     if (recent.gui_bytes_view == BYTES_BITS) {
         row_width_ = 8;
     } else if (recent.gui_bytes_view == BYTES_UTF8) {
-        row_width_ = 32; // More bytes per line for UTF-8 text view
+        // Dynamic row width based on viewport width for UTF-8 mode
+        row_width_ = calculateOptimalRowWidth();
     } else {
         row_width_ = 16;
     }
@@ -351,6 +355,14 @@ void HexDataSourceView::paintEvent(QPaintEvent *)
 
 void HexDataSourceView::resizeEvent(QResizeEvent *)
 {
+    // In UTF-8 mode, dynamically adjust row_width based on viewport width
+    if (recent.gui_bytes_view == BYTES_UTF8) {
+        int new_row_width = calculateOptimalRowWidth();
+        if (new_row_width != row_width_) {
+            row_width_ = new_row_width;
+            viewport()->update();
+        }
+    }
     updateScrollbars();
 }
 
@@ -358,6 +370,10 @@ void HexDataSourceView::showEvent(QShowEvent *)
 {
     if (layout_dirty_) {
         updateLayoutMetrics();
+        // In UTF-8 mode, recalculate row_width based on viewport width
+        if (recent.gui_bytes_view == BYTES_UTF8) {
+            row_width_ = calculateOptimalRowWidth();
+        }
         updateScrollbars();
         viewport()->update();
         layout_dirty_ = false;
@@ -509,6 +525,9 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 line += hexchars[(data_[tvb_pos] & 0x38) >> 3];
                 line += hexchars[data_[tvb_pos] & 0x07];
                 break;
+            case BYTES_UTF8:
+                // UTF-8 mode doesn't use hex display, this code shouldn't be reached
+                break;
             }
             if (build_x_pos) {
                 x_pos_to_column_ += QVector<int>().fill(tvb_pos - offset, stringWidth(line) - x_pos_to_column_.size() + slop);
@@ -565,14 +584,14 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 x_pos_to_column_ += QVector<int>().fill(-1, em_width_ * 2);
             }
             
-            int line_start_pos = line.length();
+            qsizetype line_start_pos = line.length();
             line += utf8_text;
             
             // Build x_pos_to_column_ mapping for UTF-8 text
             if (build_x_pos) {
                 // Map each displayed character position to its byte offset
                 int byte_pos = 0;
-                for (int i = 0; i < utf8_text.length(); i++) {
+                for (qsizetype i = 0; i < utf8_text.length(); i++) {
                     QChar ch = utf8_text[i];
                     int char_width = stringWidth(QString(ch));
                     x_pos_to_column_ += QVector<int>().fill(byte_pos, char_width);
@@ -587,7 +606,7 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
             if (hovered_byte_offset_ >= offset && hovered_byte_offset_ <= max_tvb_pos) {
                 int rel_pos = hovered_byte_offset_ - offset;
                 QString substr = QString::fromUtf8(line_data.left(rel_pos + 1));
-                int char_idx = substr.length() - 1;
+                qsizetype char_idx = substr.length() - 1;
                 if (char_idx >= 0 && char_idx < utf8_text.length()) {
                     QRect ho_rect = painter->boundingRect(QRect(), 0, QString(utf8_text[char_idx]));
                     ho_rect.moveLeft(stringWidth(line.left(line_start_pos + char_idx)));
@@ -882,6 +901,52 @@ int HexDataSourceView::byteOffsetAtPixel(QPoint pos)
         return -1;
     }
     return byte;
+}
+
+int HexDataSourceView::calculateOptimalRowWidth()
+{
+    // Only calculate dynamic width for UTF-8 mode
+    if (recent.gui_bytes_view != BYTES_UTF8) {
+        return recent.gui_bytes_view == BYTES_BITS ? 8 : 16;
+    }
+
+    // For UTF-8 mode, calculate based on viewport width
+    int available_width = viewport()->width();
+    if (available_width <= 0 || em_width_ <= 0) {
+        return 32; // Default fallback
+    }
+
+    // Account for offset display
+    int offset_width = offsetPixels();
+    int usable_width = available_width - offset_width;
+
+    // In UTF-8 mode, we show "  " before text (2 spaces)
+    int text_prefix_width = em_width_ * 2;
+    usable_width -= text_prefix_width;
+
+    // Calculate how many bytes can fit
+    // For UTF-8, assume average of 1.5 em_width per byte (accounting for multi-byte chars)
+    // Add separator space every separator_interval_ bytes
+    if (usable_width <= 0) {
+        return 32; // Default fallback
+    }
+
+    // Estimate: each byte takes roughly em_width_ (some UTF-8 chars may be wider)
+    // Plus separator space every separator_interval_ bytes
+    int estimated_bytes = 0;
+    int current_width = 0;
+    while (current_width < usable_width) {
+        estimated_bytes++;
+        current_width += em_width_;
+        // Add separator space
+        if (estimated_bytes % separator_interval_ == 0) {
+            current_width += em_width_;
+        }
+    }
+
+    // Ensure minimum of 16 bytes and maximum of reasonable size
+    estimated_bytes = qMax(16, qMin(estimated_bytes - 1, 256));
+    return estimated_bytes;
 }
 
 void HexDataSourceView::setHexDisplayFormat(QAction *action)
