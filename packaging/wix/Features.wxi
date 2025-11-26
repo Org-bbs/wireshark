@@ -88,13 +88,13 @@
         <ComponentGroupRef Id="CG.Tools.MMDBResolve" />
       </Feature>
       <?endif?>
-      <Feature Id="Fe.Tools.Androiddump" Title="Androiddump" Level="2" AllowAdvertise="yes" Display="expand" Description="Provide capture interfaces from Android devices.">
+      <Feature Id="Fe.Tools.Androiddump" Title="Androiddump" Level="1" AllowAdvertise="yes" Display="expand" Description="Provide capture interfaces from Android devices.">
         <ComponentGroupRef Id="CG.Tools.Androiddump" />
       </Feature>
       <Feature Id="Fe.Tools.Randpktdump" Title="Randpktdump" Level="2" AllowAdvertise="yes" Display="expand" Description="Provide random packet generator.">
         <ComponentGroupRef Id="CG.Tools.Randpktdump" />
       </Feature>
-      <Feature Id="Fe.Tools.Etwdump" Title="Etwdump" Level="2" AllowAdvertise="yes" Display="expand" Description="Provide ETW reader.">
+      <Feature Id="Fe.Tools.Etwdump" Title="Etwdump" Level="1" AllowAdvertise="yes" Display="expand" Description="Provide ETW reader.">
         <ComponentGroupRef Id="CG.Tools.Etwdump" />
       </Feature>
       <Feature Id="Fe.Tools.Sshdump" Title="Sshdump" Level="1" AllowAdvertise="yes" Display="expand" Description="Provide remote capture through SSH.">
