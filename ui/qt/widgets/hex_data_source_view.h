@@ -84,6 +84,7 @@ private:
     void scrollToByte(int byte);
     void updateScrollbars();
     int byteOffsetAtPixel(QPoint pos);
+    int calculateOptimalRowWidth();
 
     void createContextMenu();
     void updateContextMenu();
