@@ -63,7 +63,7 @@ HexDataSourceView::HexDataSourceView(const QByteArray &data, packet_char_enc enc
     show_offset_(true),
     show_hex_(true),
     show_ascii_(true),
-    row_width_(recent.gui_bytes_view == BYTES_BITS ? 8 : 16),
+    row_width_(recent.gui_bytes_view == BYTES_BITS ? 8 : (recent.gui_bytes_view == BYTES_UTF8 ? 32 : 16)),
     em_width_(0),
     line_height_(0),
     allow_hover_selection_(false)
@@ -120,6 +120,10 @@ void HexDataSourceView::createContextMenu()
     action_bytes_bits_->setData(QVariant::fromValue(BYTES_BITS));
     action_bytes_bits_->setCheckable(true);
 
+    action_bytes_utf8_ = format_actions->addAction(tr("…as UTF-8 text"));
+    action_bytes_utf8_->setData(QVariant::fromValue(BYTES_UTF8));
+    action_bytes_utf8_->setCheckable(true);
+
     ctx_menu_.addActions(format_actions->actions());
     connect(format_actions, &QActionGroup::triggered, this, &HexDataSourceView::setHexDisplayFormat);
 
@@ -174,6 +178,9 @@ void HexDataSourceView::updateContextMenu()
         break;
     case BYTES_OCT:
         action_bytes_oct_->setChecked(true);
+        break;
+    case BYTES_UTF8:
+        action_bytes_utf8_->setChecked(true);
         break;
     }
 
@@ -253,7 +260,13 @@ void HexDataSourceView::setMonospaceFont(const QFont &mono_font)
 
 void HexDataSourceView::updateByteViewSettings()
 {
-    row_width_ = recent.gui_bytes_view == BYTES_BITS ? 8 : 16;
+    if (recent.gui_bytes_view == BYTES_BITS) {
+        row_width_ = 8;
+    } else if (recent.gui_bytes_view == BYTES_UTF8) {
+        row_width_ = 32; // More bytes per line for UTF-8 text view
+    } else {
+        row_width_ = 16;
+    }
 
     updateContextMenu();
     updateScrollbars();
@@ -455,8 +468,8 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
         }
     }
 
-    // Hex
-    if (show_hex_) {
+    // Hex (skip hex display for UTF-8 text mode)
+    if (show_hex_ && recent.gui_bytes_view != BYTES_UTF8) {
         int ascii_start = static_cast<int>(line.length()) + DataPrinter::hexChars() + 3;
         // Extra hover space before and after each byte.
         int slop = em_width_ / 2;
@@ -513,6 +526,10 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 case BYTES_OCT:
                     ho_len = 3;
                     break;
+                case BYTES_UTF8:
+                    // UTF-8 mode doesn't use hex display, this code shouldn't be reached
+                    ho_len = 0;
+                    break;
                 default:
                     ws_assert_not_reached();
                 }
@@ -534,82 +551,134 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
         addHexFormatRange(fmt_list, field_a_start_, field_a_len_, offset, max_tvb_pos, ModeField);
     }
 
-    // ASCII
+    // ASCII / UTF-8 Text
     if (show_ascii_) {
-        bool in_non_printable = false;
-        int np_start = 0;
-        int np_len = 0;
-        char c;
-        int bytes_enc;
-
-        for (int tvb_pos = offset; tvb_pos <= max_tvb_pos; tvb_pos++) {
-            /* insert a space every separator_interval_ bytes */
-            if ((tvb_pos != offset) && ((tvb_pos % separator_interval_) == 0)) {
-                line += ' ';
-                if (build_x_pos) {
-                    x_pos_to_column_ += QVector<int>().fill(tvb_pos - offset - 1, em_width_ / 2);
-                }
-            }
-
-            if (recent.gui_bytes_encoding == BYTES_ENC_FROM_PACKET) {
-                switch (encoding_) {
-                case PACKET_CHAR_ENC_CHAR_ASCII:
-                    bytes_enc = BYTES_ENC_ASCII;
-                    break;
-                case PACKET_CHAR_ENC_CHAR_EBCDIC:
-                    bytes_enc = BYTES_ENC_EBCDIC;
-                    break;
-                default:
-                    ws_assert_not_reached();
-                }
-            } else {
-                bytes_enc = recent.gui_bytes_encoding;
-            }
-
-            switch (bytes_enc) {
-            case BYTES_ENC_EBCDIC:
-                c = EBCDIC_to_ASCII1(data_[tvb_pos]);
-                break;
-            case BYTES_ENC_ASCII:
-            default:
-                c = data_[tvb_pos];
-                break;
-            }
-
-            if (g_ascii_isprint(c)) {
-                line += c;
-                if (in_non_printable) {
-                    in_non_printable = false;
-                    addAsciiFormatRange(fmt_list, np_start, np_len, offset, max_tvb_pos, ModeNonPrintable);
-                }
-            } else {
-                line += UTF8_MIDDLE_DOT;
-                if (!in_non_printable) {
-                    in_non_printable = true;
-                    np_start = tvb_pos;
-                    np_len = 1;
-                } else {
-                    np_len++;
-                }
-            }
+        // For UTF-8 mode, decode and display as UTF-8 text
+        if (recent.gui_bytes_view == BYTES_UTF8) {
+            // Convert byte data to UTF-8 string
+            QByteArray line_data = data_.mid(offset, max_tvb_pos - offset + 1);
+            QString utf8_text = QString::fromUtf8(line_data);
+            
+            // Add spacing before text
+            line += "  ";
             if (build_x_pos) {
-                x_pos_to_column_ += QVector<int>().fill(tvb_pos - offset, stringWidth(line) - x_pos_to_column_.size());
+                x_pos_to_column_ += QVector<int>().fill(-1, em_width_ * 2);
             }
-            if (tvb_pos == hovered_byte_offset_ || tvb_pos == marked_byte_offset_) {
-                QRect ho_rect = painter->boundingRect(QRect(), 0, line.right(1));
-                ho_rect.moveRight(stringWidth(line));
-                ho_rect.moveTop(row_y);
-                hover_outlines_.append(ho_rect);
+            
+            int line_start_pos = line.length();
+            line += utf8_text;
+            
+            // Build x_pos_to_column_ mapping for UTF-8 text
+            if (build_x_pos) {
+                // Map each displayed character position to its byte offset
+                int byte_pos = 0;
+                for (int i = 0; i < utf8_text.length(); i++) {
+                    QChar ch = utf8_text[i];
+                    int char_width = stringWidth(QString(ch));
+                    x_pos_to_column_ += QVector<int>().fill(byte_pos, char_width);
+                    // Calculate byte length of this UTF-8 character
+                    QString single_char(ch);
+                    QByteArray char_bytes = single_char.toUtf8();
+                    byte_pos += char_bytes.length();
+                }
             }
+            
+            // Handle highlighting for hovered/marked bytes
+            if (hovered_byte_offset_ >= offset && hovered_byte_offset_ <= max_tvb_pos) {
+                int rel_pos = hovered_byte_offset_ - offset;
+                QString substr = QString::fromUtf8(line_data.left(rel_pos + 1));
+                int char_idx = substr.length() - 1;
+                if (char_idx >= 0 && char_idx < utf8_text.length()) {
+                    QRect ho_rect = painter->boundingRect(QRect(), 0, QString(utf8_text[char_idx]));
+                    ho_rect.moveLeft(stringWidth(line.left(line_start_pos + char_idx)));
+                    ho_rect.moveTop(row_y);
+                    hover_outlines_.append(ho_rect);
+                }
+            }
+            
+            // Add format ranges for field highlighting
+            addAsciiFormatRange(fmt_list, proto_start_, proto_len_, offset, max_tvb_pos, ModeProtocol);
+            if (addAsciiFormatRange(fmt_list, field_start_, field_len_, offset, max_tvb_pos, ModeField)) {
+                offset_mode = ModeOffsetField;
+            }
+            addAsciiFormatRange(fmt_list, field_a_start_, field_a_len_, offset, max_tvb_pos, ModeField);
+        } else {
+            // Original ASCII display logic
+            bool in_non_printable = false;
+            int np_start = 0;
+            int np_len = 0;
+            char c;
+            int bytes_enc;
+
+            for (int tvb_pos = offset; tvb_pos <= max_tvb_pos; tvb_pos++) {
+                /* insert a space every separator_interval_ bytes */
+                if ((tvb_pos != offset) && ((tvb_pos % separator_interval_) == 0)) {
+                    line += ' ';
+                    if (build_x_pos) {
+                        x_pos_to_column_ += QVector<int>().fill(tvb_pos - offset - 1, em_width_ / 2);
+                    }
+                }
+
+                if (recent.gui_bytes_encoding == BYTES_ENC_FROM_PACKET) {
+                    switch (encoding_) {
+                    case PACKET_CHAR_ENC_CHAR_ASCII:
+                        bytes_enc = BYTES_ENC_ASCII;
+                        break;
+                    case PACKET_CHAR_ENC_CHAR_EBCDIC:
+                        bytes_enc = BYTES_ENC_EBCDIC;
+                        break;
+                    default:
+                        ws_assert_not_reached();
+                    }
+                } else {
+                    bytes_enc = recent.gui_bytes_encoding;
+                }
+
+                switch (bytes_enc) {
+                case BYTES_ENC_EBCDIC:
+                    c = EBCDIC_to_ASCII1(data_[tvb_pos]);
+                    break;
+                case BYTES_ENC_ASCII:
+                default:
+                    c = data_[tvb_pos];
+                    break;
+                }
+
+                if (g_ascii_isprint(c)) {
+                    line += c;
+                    if (in_non_printable) {
+                        in_non_printable = false;
+                        addAsciiFormatRange(fmt_list, np_start, np_len, offset, max_tvb_pos, ModeNonPrintable);
+                    }
+                } else {
+                    line += UTF8_MIDDLE_DOT;
+                    if (!in_non_printable) {
+                        in_non_printable = true;
+                        np_start = tvb_pos;
+                        np_len = 1;
+                    } else {
+                        np_len++;
+                    }
+                }
+                if (build_x_pos) {
+                    x_pos_to_column_ += QVector<int>().fill(tvb_pos - offset, stringWidth(line) - x_pos_to_column_.size());
+                }
+                if (tvb_pos == hovered_byte_offset_ || tvb_pos == marked_byte_offset_) {
+                    QRect ho_rect = painter->boundingRect(QRect(), 0, line.right(1));
+                    ho_rect.moveRight(stringWidth(line));
+                    ho_rect.moveTop(row_y);
+                    hover_outlines_.append(ho_rect);
+                }
+            }
+            if (in_non_printable) {
+                addAsciiFormatRange(fmt_list, np_start, np_len, offset, max_tvb_pos, ModeNonPrintable);
+            }
+            addAsciiFormatRange(fmt_list, proto_start_, proto_len_, offset, max_tvb_pos, ModeProtocol);
+            if (addAsciiFormatRange(fmt_list, field_start_, field_len_, offset, max_tvb_pos, ModeField)) {
+                offset_mode = ModeOffsetField;
+            }
+            addAsciiFormatRange(fmt_list, field_a_start_, field_a_len_, offset, max_tvb_pos, ModeField);
         }
-        if (in_non_printable) {
-            addAsciiFormatRange(fmt_list, np_start, np_len, offset, max_tvb_pos, ModeNonPrintable);
-        }
-        addAsciiFormatRange(fmt_list, proto_start_, proto_len_, offset, max_tvb_pos, ModeProtocol);
-        if (addAsciiFormatRange(fmt_list, field_start_, field_len_, offset, max_tvb_pos, ModeField)) {
-            offset_mode = ModeOffsetField;
-        }
-        addAsciiFormatRange(fmt_list, field_a_start_, field_a_len_, offset, max_tvb_pos, ModeField);
     }
 
     // XXX Fields won't be highlighted if neither hex nor ascii are enabled.
@@ -678,6 +747,9 @@ bool HexDataSourceView::addHexFormatRange(QList<QTextLayout::FormatRange> &fmt_l
     case BYTES_OCT:
         chars_per_byte = 3;
         break;
+    case BYTES_UTF8:
+        // UTF-8 mode doesn't use hex display
+        return false;
     default:
         ws_assert_not_reached();
     }
