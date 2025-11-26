@@ -525,6 +525,9 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 line += hexchars[(data_[tvb_pos] & 0x38) >> 3];
                 line += hexchars[data_[tvb_pos] & 0x07];
                 break;
+            case BYTES_UTF8:
+                // UTF-8 mode doesn't use hex display, this code shouldn't be reached
+                break;
             }
             if (build_x_pos) {
                 x_pos_to_column_ += QVector<int>().fill(tvb_pos - offset, stringWidth(line) - x_pos_to_column_.size() + slop);
