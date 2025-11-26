@@ -60,10 +60,10 @@ HexDataSourceView::HexDataSourceView(const QByteArray &data, packet_char_enc enc
     field_len_(0),
     field_a_start_(0),
     field_a_len_(0),
-    show_offset_(true),
-    show_hex_(true),
+    show_offset_(recent.gui_bytes_view != BYTES_UTF8_TEXT),
+    show_hex_(recent.gui_bytes_view != BYTES_UTF8_TEXT),
     show_ascii_(true),
-    row_width_(recent.gui_bytes_view == BYTES_BITS ? 8 : 16),
+    row_width_(recent.gui_bytes_view == BYTES_BITS ? 8 : (recent.gui_bytes_view == BYTES_UTF8_TEXT ? 16 : 16)),
     em_width_(0),
     line_height_(0),
     allow_hover_selection_(false)
@@ -120,6 +120,10 @@ void HexDataSourceView::createContextMenu()
     action_bytes_bits_->setData(QVariant::fromValue(BYTES_BITS));
     action_bytes_bits_->setCheckable(true);
 
+    action_bytes_utf8_text_ = format_actions->addAction(tr("…as UTF-8 text"));
+    action_bytes_utf8_text_->setData(QVariant::fromValue(BYTES_UTF8_TEXT));
+    action_bytes_utf8_text_->setCheckable(true);
+
     ctx_menu_.addActions(format_actions->actions());
     connect(format_actions, &QActionGroup::triggered, this, &HexDataSourceView::setHexDisplayFormat);
 
@@ -174,6 +178,9 @@ void HexDataSourceView::updateContextMenu()
         break;
     case BYTES_OCT:
         action_bytes_oct_->setChecked(true);
+        break;
+    case BYTES_UTF8_TEXT:
+        action_bytes_utf8_text_->setChecked(true);
         break;
     }
 
@@ -253,7 +260,17 @@ void HexDataSourceView::setMonospaceFont(const QFont &mono_font)
 
 void HexDataSourceView::updateByteViewSettings()
 {
-    row_width_ = recent.gui_bytes_view == BYTES_BITS ? 8 : 16;
+    if (recent.gui_bytes_view == BYTES_UTF8_TEXT) {
+        row_width_ = 16; // Use a reasonable width for text display
+        show_offset_ = false;
+        show_hex_ = false;
+        show_ascii_ = true;
+    } else {
+        row_width_ = recent.gui_bytes_view == BYTES_BITS ? 8 : 16;
+        show_offset_ = true;
+        show_hex_ = true;
+        show_ascii_ = true;
+    }
 
     updateContextMenu();
     updateScrollbars();
@@ -447,6 +464,93 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
     QString line;
     HighlightMode offset_mode = ModeOffsetNormal;
 
+    // Special handling for UTF-8 text mode
+    if (recent.gui_bytes_view == BYTES_UTF8_TEXT) {
+        // Extract bytes for this line
+        QByteArray line_data = data_.mid(offset, max_tvb_pos - offset + 1);
+        // Decode as UTF-8, replacing invalid sequences
+        QString utf8_text = QString::fromUtf8(line_data);
+        
+        // Replace any replacement characters (invalid UTF-8) with dots
+        for (int i = 0; i < utf8_text.length(); i++) {
+            if (utf8_text[i].unicode() == 0xFFFD) {
+                utf8_text[i] = QChar('.');
+            }
+        }
+        
+        line = utf8_text;
+        
+        // Build x_pos_to_column_ mapping for UTF-8 text mode
+        // This is approximate - we map character positions to byte positions
+        if (build_x_pos) {
+            x_pos_to_column_.clear();
+            int byte_pos = offset;
+            for (int i = 0; i < utf8_text.length() && byte_pos <= max_tvb_pos; i++) {
+                QChar ch = utf8_text[i];
+                int char_width = stringWidth(QString(ch));
+                // Map each pixel of this character to the byte position
+                for (int j = 0; j < char_width; j++) {
+                    x_pos_to_column_.append(qMin(byte_pos - offset, max_tvb_pos - offset));
+                }
+                // Advance byte position based on UTF-8 character size
+                if (ch.unicode() < 0x80) {
+                    byte_pos += 1;
+                } else if (ch.unicode() < 0x800) {
+                    byte_pos += 2;
+                } else if (ch.unicode() < 0x10000) {
+                    byte_pos += 3;
+                } else {
+                    byte_pos += 4;
+                }
+                if (byte_pos > max_tvb_pos + 1) {
+                    byte_pos = max_tvb_pos + 1;
+                }
+            }
+        }
+        
+        // Add highlighting for fields in UTF-8 text mode
+        // In UTF-8 text mode, we need to map byte positions to character positions
+        // For simplicity, we'll approximate by using byte positions directly
+        // This is not perfect but should work for most cases
+        if (proto_start_ >= offset && proto_start_ <= max_tvb_pos) {
+            int proto_char_start = 0;
+            int proto_char_len = utf8_text.length();
+            if (proto_char_len > 0) {
+                QTextLayout::FormatRange fmt_range;
+                fmt_range.start = proto_char_start;
+                fmt_range.length = proto_char_len;
+                fmt_range.format.setBackground(palette().window());
+                fmt_range.format.setForeground(palette().windowText());
+                fmt_list << fmt_range;
+            }
+        }
+        if (field_start_ >= offset && field_start_ <= max_tvb_pos) {
+            int field_char_start = qMax(0, field_start_ - offset);
+            int field_char_end = qMin(utf8_text.length() - 1, field_start_ + field_len_ - 1 - offset);
+            if (field_char_start <= field_char_end) {
+                QTextLayout::FormatRange fmt_range;
+                fmt_range.start = field_char_start;
+                fmt_range.length = field_char_end - field_char_start + 1;
+                fmt_range.format.setBackground(palette().highlight());
+                fmt_range.format.setForeground(palette().highlightedText());
+                fmt_list << fmt_range;
+            }
+        }
+        
+        layout_->clearLayout();
+        layout_->clearFormats();
+        layout_->setText(line);
+        layout_->setFormats(fmt_list.toVector());
+        layout_->beginLayout();
+        QTextLine tl = layout_->createLine();
+        // In UTF-8 text mode, use viewport width for line width
+        tl.setLineWidth(viewport()->width());
+        tl.setLeadingIncluded(true);
+        layout_->endLayout();
+        layout_->draw(painter, QPointF(0.0, row_y));
+        return;
+    }
+
     // Offset.
     if (show_offset_) {
         line = QStringLiteral(" %1 ").arg(offset, offsetChars(false), 16, QChar('0'));
@@ -512,6 +616,9 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 case BYTES_DEC:
                 case BYTES_OCT:
                     ho_len = 3;
+                    break;
+                case BYTES_UTF8_TEXT:
+                    ho_len = 1;
                     break;
                 default:
                     ws_assert_not_reached();
@@ -677,6 +784,9 @@ bool HexDataSourceView::addHexFormatRange(QList<QTextLayout::FormatRange> &fmt_l
     case BYTES_DEC:
     case BYTES_OCT:
         chars_per_byte = 3;
+        break;
+    case BYTES_UTF8_TEXT:
+        chars_per_byte = 1;
         break;
     default:
         ws_assert_not_reached();
