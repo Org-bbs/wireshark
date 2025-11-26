@@ -1213,7 +1213,7 @@ SectionEnd ; "Tools"
 
 SectionGroup /e "External capture tools (extcap)" SecExtcapGroup
 
-Section /o "Androiddump" SecAndroiddump
+Section "Androiddump" SecAndroiddump
 ;-------------------------------------------
   !insertmacro InstallExtcap "androiddump"
 SectionEnd
