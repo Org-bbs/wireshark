@@ -98,7 +98,9 @@ BrandingText "Wireshark${U+00ae} Installer"
 ; Page custom DisplayDonatePage
 Page custom DisplayCertificationPage
 
+!define MUI_PAGE_CUSTOMFUNCTION_PRE PreselectExtcapSections
 !insertmacro MUI_PAGE_COMPONENTS
+!undef MUI_PAGE_CUSTOMFUNCTION_PRE
 !ifdef QT_DIR
 Page custom DisplayAdditionalTasksPage LeaveAdditionalTasksPage
 !endif
@@ -1559,6 +1561,10 @@ IfFileExists "$INSTDIR" 0 NoFinalErrorMsg
     MessageBox MB_OK "Unable to remove $INSTDIR." /SD IDOK IDOK 0 ; skipped if dir doesn't exist
 NoFinalErrorMsg:
 SectionEnd
+
+Function PreselectExtcapSections
+    !insertmacro SelectSection ${SecAndroiddump}
+FunctionEnd
 
 ; Sign our installer and uninstaller during compilation.
 !ifdef ENABLE_SIGNED_NSIS
