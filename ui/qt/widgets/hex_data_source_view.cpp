@@ -13,6 +13,7 @@
 #include "hex_data_source_view.h"
 
 #include <wsutil/str_util.h>
+#include <wsutil/ws_assert.h>
 
 #include <wsutil/application_flavor.h>
 #include <wsutil/utf8_entities.h>
@@ -524,6 +525,10 @@ void HexDataSourceView::drawLine(QPainter *painter, const int offset, const int 
                 line += hexchars[(data_[tvb_pos] & 0xc0) >> 6];
                 line += hexchars[(data_[tvb_pos] & 0x38) >> 3];
                 line += hexchars[data_[tvb_pos] & 0x07];
+                break;
+            case BYTES_UTF8:
+                // UTF-8 mode doesn't use hex display, this code shouldn't be reached
+                ws_assert_not_reached();
                 break;
             }
             if (build_x_pos) {
